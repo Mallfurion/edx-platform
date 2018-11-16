@@ -15,6 +15,7 @@ from django.template.loader import render_to_string
 from django.utils.translation import ugettext_lazy as _
 
 from web_fragments.fragment import Fragment
+from experiments.models import ExperimentData
 from lms.djangoapps.commerce.utils import EcommerceService
 from lms.djangoapps.courseware.masquerade import (
     get_course_masquerade,
@@ -24,6 +25,10 @@ from lms.djangoapps.courseware.masquerade import (
 from xmodule.partitions.partitions import Group, UserPartition, UserPartitionError
 from openedx.core.lib.mobile_utils import is_request_from_mobile_app
 from openedx.features.content_type_gating.models import ContentTypeGatingConfig
+from openedx.features.course_duration_limits.config import (
+    EXPERIMENT_ID,
+    EXPERIMENT_DATA_HOLDBACK_KEY
+)
 
 LOG = logging.getLogger(__name__)
 
@@ -142,6 +147,21 @@ class ContentTypeGatingPartitionScheme(object):
         # feature gating logic in place.
 
         if not ContentTypeGatingConfig.enabled_for_enrollment(user=user, course_key=course_key):
+            return cls.FULL_ACCESS
+
+        # TODO: clean up as part of REV-100
+        experiment_data_holdback_key = EXPERIMENT_DATA_HOLDBACK_KEY.format(user)
+        is_in_holdback = False
+        try:
+            holdback_value = ExperimentData.objects.get(
+                user=user,
+                experiment_id=EXPERIMENT_ID,
+                key=experiment_data_holdback_key,
+            ).value
+            is_in_holdback = holdback_value == 'True'
+        except ExperimentData.DoesNotExist:
+            pass
+        if is_in_holdback:
             return cls.FULL_ACCESS
 
         # If CONTENT_TYPE_GATING is enabled use the following logic to determine whether a user should have FULL_ACCESS
