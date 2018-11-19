@@ -11,6 +11,8 @@ from mock import patch
 
 from course_modes.tests.factories import CourseModeFactory
 from lms.djangoapps.courseware.module_render import load_single_xblock
+from openedx.core.djangoapps.user_api.tests.factories import UserCourseTagFactory
+from openedx.core.djangoapps.util.testing import TestConditionalContent
 from openedx.core.djangoapps.waffle_utils.testutils import override_waffle_flag
 from openedx.core.lib.url_utils import quote_slashes
 from openedx.features.content_type_gating.partitions import CONTENT_GATING_PARTITION_ID
@@ -25,6 +27,42 @@ from student.tests.factories import (
 )
 from xmodule.modulestore.tests.django_utils import SharedModuleStoreTestCase
 from xmodule.modulestore.tests.factories import CourseFactory, ItemFactory
+
+
+    @patch("crum.get_current_request")
+    def _assert_block_is_gated(self, mock_get_current_request, block, is_gated, user_id, course_id):
+        """
+        Asserts that a block in a specific course is gated for a specific user
+
+        Arguments:
+            block: some sort of xblock descriptor, must implement .scope_ids.usage_id
+            is_gated (bool): if True, this user is expected to be gated from this block
+            user_id (int): id of user
+            course_id (CourseLocator): id of course
+            view_name (str): type of view for the block, if not set will default to 'student_view'
+        """
+        fake_request = self.factory.get('')
+        mock_get_current_request.return_value = fake_request
+
+        # Load a block we know will pass access control checks
+        vertical_xblock = load_single_xblock(
+            request=fake_request,
+            user_id=user_id,
+            course_id=unicode(course_id),
+            usage_key_string=unicode(self.blocks_dict['vertical'].scope_ids.usage_id),
+            course=None
+        )
+        runtime = vertical_xblock.runtime
+
+        # This method of fetching the block from the descriptor bypassess access checks
+        problem_block = runtime.get_module(block)
+
+        # Attempt to render the block, this should return different fragments if the content is gated or not.
+        frag = runtime.render(problem_block, 'student_view')
+        if is_gated:
+            assert 'content-paywall' in frag.content
+        else:
+            assert 'content-paywall' not in frag.content
 
 
 @ddt.ddt
@@ -239,41 +277,6 @@ class TestProblemTypeAccess(SharedModuleStoreTestCase):
                 'blocks': blocks_dict,
             }
 
-    @patch("crum.get_current_request")
-    def _assert_block_is_gated(self, mock_get_current_request, block, is_gated, user_id, course_id):
-        """
-        Asserts that a block in a specific course is gated for a specific user
-
-        Arguments:
-            block: some sort of xblock descriptor, must implement .scope_ids.usage_id
-            is_gated (bool): if True, this user is expected to be gated from this block
-            user_id (int): id of user
-            course_id (CourseLocator): id of course
-            view_name (str): type of view for the block, if not set will default to 'student_view'
-        """
-        fake_request = self.factory.get('')
-        mock_get_current_request.return_value = fake_request
-
-        # Load a block we know will pass access control checks
-        vertical_xblock = load_single_xblock(
-            request=fake_request,
-            user_id=user_id,
-            course_id=unicode(course_id),
-            usage_key_string=unicode(self.blocks_dict['vertical'].scope_ids.usage_id),
-            course=None
-        )
-        runtime = vertical_xblock.runtime
-
-        # This method of fetching the block from the descriptor bypassess access checks
-        problem_block = runtime.get_module(block)
-
-        # Attempt to render the block, this should return different fragments if the content is gated or not.
-        frag = runtime.render(problem_block, 'student_view')
-        if is_gated:
-            assert 'content-paywall' in frag.content
-        else:
-            assert 'content-paywall' not in frag.content
-
     @ddt.data(
         ('problem', True),
         ('openassessment', True),
@@ -287,17 +290,19 @@ class TestProblemTypeAccess(SharedModuleStoreTestCase):
     )
     @ddt.unpack
     def test_access_to_problems(self, prob_type, is_gated):
-        self._assert_block_is_gated(
+        _assert_block_is_gated(
             block=self.blocks_dict[prob_type],
             user_id=self.users['audit'].id,
             course_id=self.course.id,
-            is_gated=is_gated
+            is_gated=is_gated,
+            request_factory=self.factory,
         )
-        self._assert_block_is_gated(
+        _assert_block_is_gated(
             block=self.blocks_dict[prob_type],
             user_id=self.users['verified'].id,
             course_id=self.course.id,
-            is_gated=False
+            is_gated=False,
+            request_factory=self.factory,
         )
 
     @ddt.data(
@@ -307,11 +312,12 @@ class TestProblemTypeAccess(SharedModuleStoreTestCase):
     def test_graded_score_weight_values(self, graded, has_score, weight, is_gated):
         # Verify that graded, has_score and weight must all be true for a component to be gated
         block = self.graded_score_weight_blocks[(graded, has_score, weight)]
-        self._assert_block_is_gated(
+        _assert_block_is_gated(
             block=block,
             user_id=self.audit_user.id,
             course_id=self.course.id,
-            is_gated=is_gated
+            is_gated=is_gated,
+            request_factory=self.factory,
         )
 
     @ddt.data(
@@ -341,11 +347,12 @@ class TestProblemTypeAccess(SharedModuleStoreTestCase):
          track option.  All paid type tracks should have access to all types of content.
          All users should have access to non-problem component types, the 'html' components test that.
          """
-        self._assert_block_is_gated(
+        _assert_block_is_gated(
             block=self.courses[course]['blocks'][component_type],
             user_id=self.users[user_track].id,
             course_id=self.courses[course]['course'].id,
             is_gated=is_gated,
+            request_factory=self.factory,
         )
 
     @ddt.data(
@@ -396,3 +403,76 @@ class TestProblemTypeAccess(SharedModuleStoreTestCase):
                 course_id=self.course.id,
                 is_gated=False
             )
+
+@ddt.ddt
+@override_waffle_flag(CONTENT_TYPE_GATING_FLAG, True)
+@override_settings(FIELD_OVERRIDE_PROVIDERS=(
+    'openedx.features.content_type_gating.field_override.ContentTypeGatingFieldOverride',
+))
+class TestConditionalContentAccess(TestConditionalContent):
+    """
+    Conditional Content allows course authors to run a/b tests on course content.  We want to make sure that
+    even if one of these a/b tests are being run, the student still has the correct access to the content.
+    """
+    @classmethod
+    def setUpClass(cls):
+        super(TestConditionalContentAccess, cls).setUpClass()
+        cls.factory = RequestFactory()
+    
+        CourseEnrollmentFactory.create(user=self.student_verified_a, course_id=self.course.id, mode='verified')
+        self.student_verified_b = UserFactory.create(username='student_verified_b', email='student_verified_b@example.com')
+        CourseEnrollmentFactory.create(user=self.student_verified_b, course_id=self.course.id, mode='verified')
+
+        # Put users into content gating groups
+        UserCourseTagFactory(
+            user=self.student_verified_a,
+            course_id=self.course.id,
+            key='xblock.partition_service.partition_{0}'.format(self.partition.id),
+        )
+            user=self.student_verified_b,
+            key='xblock.partition_service.partition_{0}'.format(self.partition.id),
+        )
+        # Create blocks to go into the verticals
+            parent=self.vertical_a,
+            display_name='problem_a',
+        )
+            parent=self.vertical_b,
+            display_name='problem_b',
+        )
+    def test_access_based_on_conditional_content(self):
+        """
+        If a user is enrolled as an audit user they should not have access to graded problems, including conditional content.
+        All paid type tracks should have access graded problems including conditional content.
+        """
+
+        # Make sure that all audit enrollments are gated regardless of if they see vertical a or vertical b
+        _assert_block_is_gated(
+            block=self.block_a,
+            user_id=self.student_audit_a.id,
+            course_id=self.course.id,
+            is_gated=True,
+            request_factory=self.factory,
+        )
+        _assert_block_is_gated(
+            block=self.block_b,
+            user_id=self.student_audit_b.id,
+            course_id=self.course.id,
+            is_gated=True,
+            request_factory=self.factory,
+        )
+
+        # Make sure that all verified enrollments are not gated regardless of if they see vertical a or vertical b
+        _assert_block_is_gated(
+            block=self.block_a,
+            user_id=self.student_verified_a.id,
+            course_id=self.course.id,
+            is_gated=False,
+            request_factory=self.factory,
+        )
+        _assert_block_is_gated(
+            block=self.block_b,
+            user_id=self.student_verified_b.id,
+            course_id=self.course.id,
+            is_gated=False,
+            request_factory=self.factory,
+        )
