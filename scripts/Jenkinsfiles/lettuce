@@ -15,8 +15,6 @@ def runLettuceTests() {
 def lettuceTestCleanup() {
     archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/**/*,test_root/log/**/*.log,stdout/*.log,*.log'
     junit '**/reports/acceptance/*.xml'
-    sh '''source $HOME/edx-venv/bin/activate
-    bash scripts/xdist/terminate_xdist_nodes.sh'''
 }
 
 pipeline {
@@ -25,12 +23,6 @@ pipeline {
         timestamps()
         timeout(60)
     }
-    environment {
-        XDIST_CONTAINER_SUBNET = credentials('XDIST_CONTAINER_SUBNET')
-        XDIST_CONTAINER_SECURITY_GROUP = credentials('XDIST_CONTAINER_SECURITY_GROUP')
-        XDIST_CONTAINER_TASK_NAME = "jenkins-worker-task"
-        XDIST_GIT_BRANCH = "${ghprbActualCommit}"
-    }
     stages {
         stage('Run Tests') {
             parallel {
@@ -38,8 +30,6 @@ pipeline {
                     agent { label "jenkins-worker" }
                     environment {
                         TEST_SUITE = "lms-acceptance"
-                        XDIST_NUM_TASKS = 2
-                        XDIST_REMOTE_NUM_PROCESSES = 2
                     }
                     steps {
                         script {
@@ -58,8 +48,6 @@ pipeline {
                     agent { label "jenkins-worker" }
                     environment {
                         TEST_SUITE = "cms-acceptance"
-                        XDIST_NUM_TASKS = 2
-                        XDIST_REMOTE_NUM_PROCESSES = 2
                     }
                     steps {
                         script {
