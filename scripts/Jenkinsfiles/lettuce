@@ -18,6 +18,7 @@ def lettuceTestCleanup() {
 }
 
 pipeline {
+    agent none
     options {
         timestamps()
         timeout(60)
