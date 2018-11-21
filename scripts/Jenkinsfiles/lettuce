@@ -13,7 +13,7 @@ def runLettuceTests() {
 }
 
 def lettuceTestCleanup() {
-    archiveArtifacts allowEmptyArchive: true, artifacts: '**/reports/acceptance/*.xml'
+    archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/**/*,test_root/log/**/*.log,stdout/*.log,*.log'
     junit '**/reports/acceptance/*.xml'
     sh '''source $HOME/edx-venv/bin/activate
     bash scripts/xdist/terminate_xdist_nodes.sh'''
