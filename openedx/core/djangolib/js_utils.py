@@ -9,7 +9,7 @@ from mako.filters import decode
 from xmodule.modulestore import EdxJSONEncoder
 
 
-def _escape_json_for_js(json_dumps_string):
+def escape_json_for_js(json_dumps_string):
     """
     Escape output of JSON dumps that is safe to be embedded in a <SCRIPT> tag.
 
@@ -69,7 +69,7 @@ def dump_js_escaped_json(obj, cls=EdxJSONEncoder):
 
     """
     json_string = json.dumps(obj, ensure_ascii=True, cls=cls)
-    json_string = _escape_json_for_js(json_string)
+    json_string = escape_json_for_js(json_string)
     return json_string
 
 

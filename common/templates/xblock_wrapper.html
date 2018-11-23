@@ -1,7 +1,10 @@
+<%!
+from openedx.core.djangolib.js_utils import escape_json_for_js
+%>
 <div class="${' '.join(classes) | n}" ${data_attributes}>
 % if js_init_parameters:
   <script type="json/xblock-args" class="xblock-json-init-args">
-    ${js_init_parameters}
+    ${js_init_parameters | n, escape_json_for_js}
   </script>
 % endif
   ${content}
